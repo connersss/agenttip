@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentTip — Tip any Agent ID holder by their .ai name</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5; background: #0f0f0f; color: #f2f2f2; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h1 span { color: #f0b90b; }
+  .sub { color: #aaa; margin: 0 0 20px; }
+  .card { background: #1a1a1a; border: 1px solid #2c2c2c; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 0.85rem; color: #bbb; margin: 10px 0 4px; }
+  input { width: 100%; padding: 10px 12px; font-size: 1rem; border-radius: 8px; border: 1px solid #3a3a3a; background: #111; color: #fff; }
+  input:focus { outline: 2px solid #f0b90b; border-color: #f0b90b; }
+  .row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  button { padding: 10px 16px; font-size: 1rem; border-radius: 8px; border: none; cursor: pointer; background: #f0b90b; color: #111; font-weight: 700; }
+  button.secondary { background: #2c2c2c; color: #fff; font-weight: 600; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { margin-top: 12px; font-size: 0.95rem; word-break: break-all; }
+  .status.ok { color: #7ee787; }
+  .status.err { color: #ff7b72; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+  .muted { color: #999; font-size: 0.9rem; }
+  .warn { border: 1px solid #7a5b00; background: #2a2103; color: #ffd866; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.95rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid #2c2c2c; vertical-align: top; word-break: break-all; }
+  th { color: #999; font-weight: 600; }
+  a { color: #f0b90b; }
+  @media (max-width: 480px) { h1 { font-size: 1.35rem; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent<span>Tip</span></h1>
+  <p class="sub">Tip any Agent ID holder by their .ai name, on BNB Chain.</p>
+
+  <div class="warn">
+    Tips are <strong>irreversible</strong> and go <strong>directly to the Agent ID owner</strong>.
+    Always resolve the name first and check the recipient address before you tip.
+    AgentTip charges no fee and holds no funds: the full amount is forwarded in the same transaction.
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-top:0">
+      <button id="connectBtn">Connect wallet</button>
+      <span id="walletStatus" class="muted" style="align-self:center">Not connected</span>
+    </div>
+    <p class="muted" style="margin:10px 0 0">
+      Works with MetaMask or Binance Wallet (injected provider, EIP-1193).
+      No QR-code login, no account on any server. Switch your wallet to BNB Chain (chain ID 56).
+    </p>
+  </div>
+
+  <div class="card">
+    <label for="agentInput">Agent ID</label>
+    <input id="agentInput" type="text" placeholder="so1inaa.ai" autocomplete="off" spellcheck="false">
+    <label for="amountInput">Amount (BNB)</label>
+    <input id="amountInput" type="number" min="0" step="0.001" placeholder="0.01">
+    <div class="row">
+      <button id="resolveBtn" class="secondary">Resolve</button>
+      <button id="tipBtn">Send tip</button>
+    </div>
+    <div id="resolveOut" class="status"></div>
+    <div id="tipOut" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 8px">Recent tips</h2>
+    <p class="muted" style="margin:0 0 8px">The 10 most recent tips, read from BNB Chain.</p>
+    <table>
+      <thead><tr><th>From</th><th>To (Agent ID)</th><th>Amount</th></tr></thead>
+      <tbody id="tipsBody"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="muted">
+    How it works: an Agent ID's tokenId is <span class="mono">uint256(keccak256(label))</span>,
+    where the label is the name without ".ai". The contract looks up the owner of that tokenId
+    on the Agent ID contract (<span class="mono">0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F</span>)
+    and forwards your tip to them.
+    Contract: <span id="contractAddr" class="mono">not deployed yet</span> ·
+    <a href="https://github.com/connersss/agenttip" target="_blank" rel="noopener">Source on GitHub</a>
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ---- Config ----
+  // Fill in after the mainnet deployment. Until then the page runs in
+  // read-only demo mode for resolving (it can still resolve via the Agent ID
+  // contract) and tipping is disabled.
+  var AGENT_TIP_ADDRESS = ""; // e.g. "0x..."
+  var AGENT_ID_ADDRESS = "0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F";
+  var BSC_CHAIN_ID = 56;
+  var BSC_RPC = "https://bsc-dataseed1.bnbchain.org";
+
+  var TIP_ABI = [
+    "function tip(string calldata agentId) external payable",
+    "function resolve(string calldata agentId) external view returns (address)",
+    "event Tipped(address indexed sender, address indexed recipient, uint256 indexed tokenId, string agentId, uint256 amount)"
+  ];
+  var AGENT_ID_ABI = [
+    "function ownerOf(uint256 tokenId) external view returns (address)"
+  ];
+
+  // ---- Helpers ----
+  function $(id) { return document.getElementById(id); }
+  function normalizeAgentId(raw) {
+    var s = (raw || "").trim().toLowerCase();
+    if (s.endsWith(".ai")) s = s.slice(0, -3);
+    return s;
+  }
+  function shortAddr(a) {
+    return a ? a.slice(0, 6) + "…" + a.slice(-4) : "";
+  }
+  function setStatus(el, msg, cls) {
+    el.textContent = msg;
+    el.className = "status" + (cls ? " " + cls : "");
+  }
+
+  var provider = null; // ethers BrowserProvider (wallet)
+  var signer = null;
+  var tipContract = null;
+  var readProvider = new ethers.JsonRpcProvider(BSC_RPC);
+  var readTipContract = null;
+
+  if (AGENT_TIP_ADDRESS) {
+    $("contractAddr").textContent = AGENT_TIP_ADDRESS;
+    readTipContract = new ethers.Contract(AGENT_TIP_ADDRESS, TIP_ABI, readProvider);
+  }
+
+  // ---- Connect wallet (EIP-1193 injected provider only) ----
+  $("connectBtn").addEventListener("click", async function () {
+    if (!window.ethereum) {
+      setStatus($("walletStatus"), "No injected wallet found. Install MetaMask or Binance Wallet.", "err");
+      return;
+    }
+    try {
+      provider = new ethers.BrowserProvider(window.ethereum);
+      var network = await provider.getNetwork();
+      if (Number(network.chainId) !== BSC_CHAIN_ID) {
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x38" }]
+          });
+        } catch (e) {
+          setStatus($("walletStatus"), "Please switch your wallet to BNB Chain (chain ID 56).", "err");
+          return;
+        }
+      }
+      signer = await provider.getSigner();
+      var addr = await signer.getAddress();
+      $("walletStatus").textContent = "Connected: " + shortAddr(addr);
+      $("walletStatus").className = "muted ok";
+      if (AGENT_TIP_ADDRESS) tipContract = new ethers.Contract(AGENT_TIP_ADDRESS, TIP_ABI, signer);
+    } catch (e) {
+      setStatus($("walletStatus"), "Connection failed: " + (e && e.message ? e.message : e), "err");
+    }
+  });
+
+  // ---- Resolve ----
+  $("resolveBtn").addEventListener("click", async function () {
+    var label = normalizeAgentId($("agentInput").value);
+    if (!label) { setStatus($("resolveOut"), "Enter an Agent ID first.", "err"); return; }
+    setStatus($("resolveOut"), "Resolving " + label + ".ai …");
+    try {
+      var owner;
+      if (tipContract) {
+        owner = await tipContract.resolve(label);
+      } else {
+        // Fall back to reading the Agent ID contract directly.
+        var agentId = new ethers.Contract(AGENT_ID_ADDRESS, AGENT_ID_ABI, readProvider);
+        var tokenId = ethers.keccak256(ethers.toUtf8Bytes(label));
+        owner = await agentId.ownerOf(tokenId);
+      }
+      setStatus($("resolveOut"), label + ".ai is owned by " + owner, "ok");
+    } catch (e) {
+      setStatus($("resolveOut"), "Could not resolve " + label + ".ai — that Agent ID may not exist.", "err");
+    }
+  });
+
+  // ---- Tip ----
+  $("tipBtn").addEventListener("click", async function () {
+    var label = normalizeAgentId($("agentInput").value);
+    var amountStr = ($("amountInput").value || "").trim();
+    if (!label) { setStatus($("tipOut"), "Enter an Agent ID first.", "err"); return; }
+    if (!amountStr || Number(amountStr) <= 0) { setStatus($("tipOut"), "Enter an amount greater than 0 BNB.", "err"); return; }
+    if (!AGENT_TIP_ADDRESS) { setStatus($("tipOut"), "AgentTip is not deployed yet — tipping is disabled.", "err"); return; }
+    if (!signer || !tipContract) { setStatus($("tipOut"), "Connect your wallet first.", "err"); return; }
+    try {
+      setStatus($("tipOut"), "Resolving " + label + ".ai …");
+      var owner = await tipContract.resolve(label);
+      if (!window.confirm("Send " + amountStr + " BNB to " + label + ".ai (" + owner + ")? Tips are irreversible.")) {
+        setStatus($("tipOut"), "Cancelled.");
+        return;
+      }
+      setStatus($("tipOut"), "Sending tip… confirm in your wallet.");
+      var tx = await tipContract.tip(label, { value: ethers.parseEther(amountStr) });
+      setStatus($("tipOut"), "Transaction sent: " + tx.hash + " — waiting for confirmation…");
+      await tx.wait();
+      setStatus($("tipOut"), "Tip sent! " + amountStr + " BNB to " + label + ".ai (" + owner + "). Tx: " + tx.hash, "ok");
+      loadRecentTips();
+    } catch (e) {
+      setStatus($("tipOut"), "Tip failed: " + (e && e.message ? e.message : e), "err");
+    }
+  });
+
+  // ---- Recent tips ----
+  async function loadRecentTips() {
+    var body = $("tipsBody");
+    if (!readTipContract) {
+      body.innerHTML = '<tr><td colspan="3" class="muted">Contract not deployed yet — no tips to show.</td></tr>';
+      return;
+    }
+    try {
+      var latest = await readProvider.getBlockNumber();
+      var from = Math.max(0, latest - 200000);
+      var events = await readTipContract.queryFilter("Tipped", from, latest);
+      events = events.slice(-10).reverse();
+      if (!events.length) {
+        body.innerHTML = '<tr><td colspan="3" class="muted">No tips yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = events.map(function (ev) {
+        var amt = ethers.formatEther(ev.args.amount);
+        return "<tr><td>" + shortAddr(ev.args.sender) + "</td><td>" +
+          ev.args.agentId + ".ai<br><span class='muted'>" + shortAddr(ev.args.recipient) +
+          "</span></td><td>" + amt + " BNB</td></tr>";
+      }).join("");
+    } catch (e) {
+      body.innerHTML = '<tr><td colspan="3" class="muted">Could not load recent tips.</td></tr>';
+    }
+  }
+
+  loadRecentTips();
+})();
+</script>
+</body>
+</html>
