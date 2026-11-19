@@ -26,7 +26,7 @@ Agent ID contract (SPACE ID Agent ID, ERC-721, non-transferable, BNB Chain mainn
 0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F
 ```
 
-AgentTip contract address: **TBD** (fill in after mainnet deployment).
+AgentTip contract address: **0xe22E62a2aCD5dD58137a7325d15CF0B6f7c257e6** (BNB Chain mainnet, deployed 2026-11-19 via CREATE2 factory, tx 0xead1386b33fc7d09164e44a1e8065849f2c8ad5f51dae44505c431e6fdcfc6dd, block 134499952).
 
 ## Frontend
 
